@@ -1,7 +1,9 @@
 # The claude CLI stays outside devbox; CI overrides it: CLAUDE="pnpm dlx @anthropic-ai/claude-code@<version>"
 claude := env_var_or_default('CLAUDE', 'claude')
 
-# Run inside devbox: `devbox run -- just <recipe>` or via direnv.
+# Every recipe runs its tools through devbox, so `just <recipe>` works from a bare
+# shell and from pre-commit's `language: system` hooks (which run outside devbox).
+dbx := "devbox run --"
 
 default:
     @just --list
@@ -13,27 +15,27 @@ types:
     @if [ -n "${CLAUDE_CODE_TYPES:-}" ]; then mkdir -p .claude-plugin/types/claude-code && cp "$CLAUDE_CODE_TYPES" .claude-plugin/types/claude-code/index.d.ts; fi
 
 typecheck: types
-    pnpm exec tsc --noEmit -p .
+    {{dbx}} pnpm exec tsc --noEmit -p .
 
 test:
-    pnpm exec vitest run
+    {{dbx}} pnpm exec vitest run
 
 plugin-test:
-    {{claude}} plugin test .
+    {{dbx}} {{claude}} plugin test .
 
 lint:
-    biome check .
+    {{dbx}} biome check .
 
 format:
-    biome check --write .
+    {{dbx}} biome check --write .
 
 validate:
-    {{claude}} plugin validate .
+    {{dbx}} {{claude}} plugin validate .
 
 # Installs the git pre-commit hook (.pre-commit-config.yaml); devbox does it on shell entry once .git exists.
 hooks:
-    pre-commit install
+    {{dbx}} pre-commit install
 
-# What CI runs.
+# What CI runs. pre-commit is the source of truth (system hooks only, no Python).
 ci:
-    pre-commit run --all-files
+    {{dbx}} pre-commit run --all-files

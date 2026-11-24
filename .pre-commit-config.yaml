@@ -1,19 +1,7 @@
 # Source of truth for checks: runs on commit locally and, via `just ci`, in CI.
-exclude: ^(devbox\.lock|pnpm-lock\.yaml|\.claude-plugin/types/)
+# Only system hooks, no remote repos: those build a Python virtualenv per repo at
+# run time, which cannot seed under devbox's Nix Python. biome covers formatting.
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
-    hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: mixed-line-ending
-        args: [--fix=lf]
-      - id: check-yaml
-      - id: check-json
-      - id: check-merge-conflict
-      - id: check-case-conflict
-      - id: check-added-large-files
-      - id: detect-private-key
   - repo: local
     hooks:
       - id: lint
