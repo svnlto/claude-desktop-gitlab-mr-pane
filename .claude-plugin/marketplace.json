@@ -1,0 +1,6 @@
+{
+  "name": "gitlab-mr-pane",
+  "owner": { "name": "svnlto" },
+  "description": "Claude Code mods for GitLab.",
+  "plugins": [{ "name": "gitlab-mr-pane", "source": "./" }]
+}

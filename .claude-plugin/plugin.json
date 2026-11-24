@@ -1,0 +1,8 @@
+{
+  "name": "gitlab-mr-pane",
+  "version": "0.1.0",
+  "description": "Side pane for the current branch's GitLab merge request: pipeline, approvals, open threads and GitLab Duo runs, driven by glab.",
+  "author": { "name": "svnlto" },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

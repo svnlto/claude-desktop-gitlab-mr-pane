@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      CLAUDE: pnpm dlx @anthropic-ai/claude-code@2.1.325
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: jetify-com/devbox-install-action@v0.16.0
+        with:
+          enable-cache: 'true'
+          devbox-version: 0.22.0
+      - run: devbox run -- just ci

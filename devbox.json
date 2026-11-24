@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/main/.schema/devbox.schema.json",
+  "packages": [
+    "glab@1.130.0",
+    "nodejs@26.13.1",
+    "pnpm@12.9.0",
+    "biome@2.6.8",
+    "just@1.59.0",
+    "pre-commit@4.7.0"
+  ],
+  "shell": {
+    "init_hook": [
+      "pnpm install --frozen-lockfile --silent || pnpm install --silent",
+      "[ -d .git ] && pre-commit install >/dev/null || true"
+    ]
+  }
+}

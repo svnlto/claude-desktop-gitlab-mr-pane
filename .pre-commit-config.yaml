@@ -1,0 +1,42 @@
+# Source of truth for checks: runs on commit locally and, via `just ci`, in CI.
+exclude: ^(devbox\.lock|pnpm-lock\.yaml|\.claude-plugin/types/)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+  - repo: local
+    hooks:
+      - id: lint
+        name: lint
+        entry: just lint
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: test
+        name: test
+        entry: just test
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: validate
+        name: validate
+        entry: just validate
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: plugin-test
+        name: plugin-test
+        entry: just plugin-test
+        language: system
+        pass_filenames: false
+        always_run: true
