@@ -61,6 +61,9 @@ const ICONS: Record<string, { d: string; color?: string }> = {
   pause: { d: 'M8 5v14M16 5v14', color: '#8b949e' },
   sparkles: { d: 'M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' },
   paperclip: { d: 'M20 11l-8 8a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8' },
+  jobs: { d: 'M4 6h16M4 12h16M4 18h10' },
+  threads: { d: 'M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z' },
+  runs: { d: 'M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z' },
 }
 const GLYPHS: Record<string, string> = {
   mr: 'MR',
@@ -71,6 +74,9 @@ const GLYPHS: Record<string, string> = {
   pause: '||',
   sparkles: '*',
   paperclip: '@',
+  jobs: '≡',
+  threads: '#',
+  runs: '↻',
 }
 const svg = (name: string): string => {
   const i = ICONS[name] ?? { d: '' }
@@ -298,37 +304,42 @@ export const register: Register = (on) => {
         {row(
           'head',
           icon('mr'),
-          <Text bold>{mr ? truncate(`!${mr.iid} ${mr.title}`, 48) : 'No merge request'}</Text>,
+          <Text bold>{mr ? truncate(`!${mr.iid} ${mr.title}`, 48) : 'Merge request'}</Text>,
           <Button key="refresh" label="Refresh" plain onPress={() => refresh($)} />,
         )}
-        {mr && (
-          <Text dimColor>
-            {mr.source} -&gt; {mr.target} · updated {relativeTime(now, mr.updatedAt)}
+        <Text dimColor>
+          {mr
+            ? `${mr.source} -> ${mr.target} · updated ${relativeTime(now, mr.updatedAt)}`
+            : 'No merge request for the current branch.'}
+        </Text>
+        {ui.error && <Text color="error">{truncate(ui.error, 80)}</Text>}
+        <Box flexDirection="row" gap={2}>
+          <Text
+            color={
+              mr && pipeline === 'failed'
+                ? 'error'
+                : mr && pipeline === 'passed'
+                  ? 'success'
+                  : undefined
+            }
+            dimColor={!mr}
+          >
+            Pipeline {mr ? (pipeline === 'none' ? 'none' : pipeline) : '—'}
           </Text>
-        )}
-        {ui.error && <Text color="error">{ui.error}</Text>}
-        {!mr && !ui.error && <Text dimColor>No merge request for the current branch.</Text>}
-        {mr && (
-          <Box flexDirection="row" gap={2}>
-            <Text
-              color={
-                pipeline === 'failed' ? 'error' : pipeline === 'passed' ? 'success' : undefined
-              }
-            >
-              Pipeline {pipeline === 'none' ? 'none' : pipeline}
-            </Text>
-            <Text color={short ? 'warning' : 'success'}>
-              Approvals {mr.approvalsGiven} of {mr.approvalsRequired}
-            </Text>
-            <Text color={mr.threads.length ? 'warning' : undefined} dimColor={!mr.threads.length}>
-              {mr.threads.length} open threads
-            </Text>
-          </Box>
-        )}
-        {mr && mr.jobs.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Pipeline jobs</Text>
-            {mr.jobs.map((j) =>
+          <Text color={mr ? (short ? 'warning' : 'success') : undefined} dimColor={!mr}>
+            Approvals {mr ? `${mr.approvalsGiven} of ${mr.approvalsRequired}` : '—'}
+          </Text>
+          <Text
+            color={mr && mr.threads.length ? 'warning' : undefined}
+            dimColor={!mr || !mr.threads.length}
+          >
+            {mr ? `${mr.threads.length} open threads` : '— open threads'}
+          </Text>
+        </Box>
+        <Box flexDirection="column">
+          {row('jobs-head', icon('jobs'), <Text bold>Pipeline jobs</Text>)}
+          {mr && mr.jobs.length > 0 ? (
+            mr.jobs.map((j) =>
               row(
                 `job-${j.id}`,
                 icon(jobIcon(j.status)),
@@ -343,13 +354,15 @@ export const register: Register = (on) => {
                   />
                 ),
               ),
-            )}
-          </Box>
-        )}
-        {mr && mr.threads.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Open threads</Text>
-            {mr.threads.map((th) => {
+            )
+          ) : (
+            <Text dimColor>{mr ? 'No jobs' : '—'}</Text>
+          )}
+        </Box>
+        <Box flexDirection="column">
+          {row('threads-head', icon('threads'), <Text bold>Open threads</Text>)}
+          {mr && mr.threads.length > 0 ? (
+            mr.threads.map((th) => {
               const where = th.path ? `${th.path}${th.line ? `:${th.line}` : ''}` : 'general'
               return row(
                 `th-${th.id}`,
@@ -368,9 +381,11 @@ export const register: Register = (on) => {
                   }
                 />,
               )
-            })}
-          </Box>
-        )}
+            })
+          ) : (
+            <Text dimColor>{mr ? 'None' : '—'}</Text>
+          )}
+        </Box>
         <Box flexDirection="column" gap={1}>
           {row(
             'duo-head',
@@ -488,10 +503,10 @@ export const register: Register = (on) => {
             )}
           </Box>
         )}
-        {runs.length > 0 && (
-          <Box flexDirection="column">
-            <Text bold>Recent runs</Text>
-            {runs.map((r) =>
+        <Box flexDirection="column">
+          {row('runs-head', icon('runs'), <Text bold>Recent runs</Text>)}
+          {runs.length > 0 ? (
+            runs.map((r) =>
               row(
                 `run-${r.sessionId}`,
                 <Button
@@ -520,9 +535,11 @@ export const register: Register = (on) => {
                 </Text>,
                 <Text dimColor>{relativeTime(now, r.at)}</Text>,
               ),
-            )}
-          </Box>
-        )}
+            )
+          ) : (
+            <Text dimColor>No runs yet</Text>
+          )}
+        </Box>
       </Box>
     )
   })

@@ -136,6 +136,25 @@ test('the empty pane says there is no merge request', async ($, on) => {
   expect(await screen($)).toContain('No merge request for the current branch.')
 })
 
+test('the skeleton renders every section even with no data', async ($, on) => {
+  harness(on, healthy())
+  const s = await screen($)
+  for (const section of ['Pipeline jobs', 'Open threads', 'GitLab Duo', 'Recent runs']) {
+    expect(s).toContain(section)
+  }
+})
+
+test('a hard glab failure still renders the skeleton, not just the error', async ($, on) => {
+  harness(on, {
+    [MR_VIEW]: { exitCode: 1, stdout: '{"error":{"message":"401 Unauthorized"}}', stderr: 'ERROR' },
+  })
+  const s = await refreshed($)
+  expect(s).toContain('Could not refresh: 401 Unauthorized')
+  expect(s).toContain('Pipeline jobs')
+  expect(s).toContain('GitLab Duo')
+  expect(s).not.toContain('!7')
+})
+
 test('refresh fills the header, badges, jobs and threads', async ($, on) => {
   harness(on, healthy())
   const s = await refreshed($)
