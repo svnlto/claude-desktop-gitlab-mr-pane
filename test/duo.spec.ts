@@ -1,62 +1,53 @@
 import { describe, expect, it } from 'vitest'
-import { contextItems, parseRun, resumeArgv, startArgv } from '../hooks/lib/duo'
+import {
+  contextBlock,
+  describeDuoFailure,
+  parseRun,
+  planSteps,
+  resumeArgv,
+  startArgv,
+} from '../hooks/lib/duo'
 
 const s = { model: 'm', workflowType: '', skill: '' }
+const all = { model: 'claude_sonnet_5_5', workflowType: 'chat', skill: 'review' }
+const chip = { id: 'job-1', label: 'lint job log', content: 'boom' }
 
-describe('argv', () => {
-  it('start never passes --yes and attaches context', () => {
-    const a = startArgv('go', [{ id: '1', label: 'lint job log', content: 'x' }], s)
-    expect(a).not.toContain('--yes')
-    expect(a).toContain('--ai-context-items')
-    expect(a.slice(0, 4)).toEqual(['glab', 'duo', 'cli', 'run'])
+// Real document shape from duo 10.x (schemaVersion 2.1).
+const doc = (response: string, over: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    schemaVersion: '2.1',
+    sessionId: '2717',
+    exitCode: 0,
+    response,
+    elements: [{ type: 'message', role: 'assistant', content: response, isComplete: true }],
+    status: 'success',
+    ...over,
+  })
+
+const goalOf = (argv: readonly string[]) => argv[argv.indexOf('--goal') + 1] ?? ''
+
+describe('startArgv', () => {
+  it('runs headless json from glab and never passes a skip-approval flag', () => {
+    const a = startArgv('go', [chip], s)
+    expect(a.slice(0, 6)).toEqual(['glab', 'duo', 'cli', 'run', '--output-format', 'json'])
     expect(a).toContain('--model')
-    expect(a).not.toContain('--skill')
+    for (const bad of ['--yes', '-y', '--dangerously-skip-permissions']) {
+      expect(a).not.toContain(bad)
+    }
   })
-  it('approve and reject', () => {
-    expect(resumeArgv('S', { approve: true }, s)).toEqual(
-      expect.arrayContaining(['--existing-session-id', 'S', '--approval', 'true']),
-    )
-    const r = resumeArgv('S', { approve: false, reason: 'no' }, s)
-    expect(r).toEqual(expect.arrayContaining(['--approval', 'false', '--rejection-reason', 'no']))
+  it('keeps the goal as one argv entry, after the plan-only instruction', () => {
+    const goal = `fix "this" && rm -rf /`
+    const g = goalOf(startArgv(goal, [], s))
+    expect(g.startsWith('PLAN ONLY.')).toBe(true)
+    expect(g).toContain(`Goal: ${goal}`)
   })
-})
-
-describe('parseRun', () => {
-  it('detects plan checkpoint', () => {
-    const r = parseRun(
-      JSON.stringify({ session_id: 'S', status: 'INPUT_REQUIRED', plan: ['a', 'b'] }),
-      0,
-    )
-    expect(r).toMatchObject({ sessionId: 'S', state: 'awaiting plan', plan: ['a', 'b'] })
+  it('puts context in the goal, not in --ai-context-items', () => {
+    const a = startArgv('go', [chip], s)
+    expect(a).not.toContain('--ai-context-items')
+    expect(goalOf(a)).toContain('<context title="lint job log">\nboom\n</context>')
   })
-  it('splits numbered text plans', () => {
-    expect(parseRun('{"status":"paused","plan":"1. a\\n2) b"}', 0).plan).toEqual(['a', 'b'])
-  })
-  it('failed on exit code', () => expect(parseRun('garbage', 1).state).toBe('failed'))
-  it('done', () =>
-    expect(parseRun('{"status":"completed","result":"ok"}', 0)).toMatchObject({
-      state: 'done',
-      text: 'ok',
-    }))
-})
-
-describe('contextItems', () => {
-  it('encodes chips as a json array of snippets', () => {
-    const items = JSON.parse(
-      contextItems([{ id: 'job-1', label: 'lint job log', content: 'boom' }]),
-    )
-    expect(items).toEqual([
-      { category: 'snippet', id: 'job-1', content: 'boom', metadata: { title: 'lint job log' } },
-    ])
-  })
-  it('is an empty array for no chips', () => expect(contextItems([])).toBe('[]'))
-})
-
-describe('argv edges', () => {
-  const all = { model: 'claude_sonnet_5_5', workflowType: 'chat', skill: 'review' }
-  it('passes every setting when present, as one value each', () => {
-    const a = startArgv('go', [], all)
-    expect(a).toEqual(
+  it('passes every setting when present', () => {
+    expect(startArgv('go', [], all)).toEqual(
       expect.arrayContaining([
         '--model',
         'claude_sonnet_5_5',
@@ -66,68 +57,119 @@ describe('argv edges', () => {
         'review',
       ]),
     )
-    expect(a).not.toContain('--ai-context-items')
-    expect(a).toContain('--output-format')
   })
-  it('keeps a goal with spaces and quotes as a single argv entry', () => {
-    const goal = `fix "this" && rm -rf /`
-    const a = startArgv(goal, [], s)
-    expect(a[a.indexOf('--goal') + 1]).toBe(goal)
-  })
-  it('never contains --yes in any form', () => {
-    const chips = [{ id: '1', label: 'l', content: 'c' }]
-    for (const a of [
-      startArgv('g', chips, all),
-      resumeArgv('S', { approve: true }, all),
-      resumeArgv('S', { approve: false, reason: 'r' }, all),
-    ]) {
-      expect(a.some((x) => x === '--yes' || x === '-y')).toBe(false)
-    }
-  })
-  it('resume carries the session, settings and the rejection reason as the goal', () => {
-    const a = resumeArgv('S1', { approve: false, reason: 'too broad' }, all)
-    expect(a[a.indexOf('--existing-session-id') + 1]).toBe('S1')
-    expect(a[a.indexOf('--goal') + 1]).toBe('too broad')
-    expect(a[a.indexOf('--rejection-reason') + 1]).toBe('too broad')
-    expect(a).toContain('--model')
-  })
-  it('approval has no rejection reason', () => {
-    expect(resumeArgv('S', { approve: true }, s)).not.toContain('--rejection-reason')
+  it('omits empty settings', () => {
+    const a = startArgv('go', [], { model: '', workflowType: '', skill: '' })
+    expect(a).not.toContain('--model')
+    expect(a).not.toContain('--skill')
   })
 })
 
-describe('parseRun edges', () => {
-  it('skips log noise before the document', () => {
-    const out = `downloading duo...\n${JSON.stringify({ session_id: 'S', status: 'completed', result: 'ok' })}`
-    expect(parseRun(out, 0)).toMatchObject({ sessionId: 'S', state: 'done', text: 'ok' })
-  })
-  it('reads plan steps given as objects', () => {
-    const r = parseRun(
-      JSON.stringify({
-        workflow_id: 'W',
-        status: 'paused',
-        plan: [{ description: 'a' }, { title: 'b' }, {}],
-      }),
-      0,
+describe('contextBlock', () => {
+  it('is empty for no chips and separates several', () => {
+    expect(contextBlock([])).toBe('')
+    expect(contextBlock([chip, { ...chip, id: '2', label: 'b' }]).split('</context>').length).toBe(
+      3,
     )
-    expect(r.sessionId).toBe('W')
-    expect(r.plan).toEqual(['a', 'b'])
   })
-  it('strips bullets from a text plan', () => {
+})
+
+describe('resumeArgv', () => {
+  it('approval resumes the session and tells Duo to execute', () => {
+    const a = resumeArgv('S1', { approve: true }, all)
+    expect(a[a.indexOf('--existing-session-id') + 1]).toBe('S1')
+    expect(goalOf(a)).toBe('Plan approved. Execute the plan now.')
+    expect(a).toContain('--model')
+  })
+  it('rejection sends the reason and asks for a revised plan only', () => {
+    const g = goalOf(resumeArgv('S1', { approve: false, reason: 'too broad' }, s))
+    expect(g).toContain('Feedback: too broad')
+    expect(g).toContain('Do not change anything')
+  })
+  it('never uses the tool-approval flags or a skip flag', () => {
+    for (const d of [{ approve: true as const }, { approve: false as const, reason: 'r' }]) {
+      const a = resumeArgv('S', d, s)
+      for (const bad of [
+        '--yes',
+        '-y',
+        '--approval',
+        '--rejection-reason',
+        '--dangerously-skip-permissions',
+      ]) {
+        expect(a).not.toContain(bad)
+      }
+    }
+  })
+})
+
+describe('planSteps', () => {
+  it('reads numbered lines with . or ) and ignores prose', () => {
+    expect(planSteps('Plan:\n1. Edit a.go\n 2) Run `tests`\n\nI will wait.')).toEqual([
+      'Edit a.go',
+      'Run `tests`',
+    ])
+  })
+  it('is empty without a numbered list', () => expect(planSteps('Just ok')).toEqual([]))
+})
+
+describe('parseRun', () => {
+  it('a plan-phase answer with numbered steps awaits approval', () => {
+    const r = parseRun(doc('Plan:\n1. Create file\n2. Verify\nWaiting for approval.'), 0, 'plan')
+    expect(r).toMatchObject({
+      sessionId: '2717',
+      state: 'awaiting plan',
+      plan: ['Create file', 'Verify'],
+    })
+  })
+  it('a plan-phase answer without steps is simply done', () => {
+    expect(parseRun(doc('ok'), 0, 'plan')).toMatchObject({ state: 'done', text: 'ok', plan: [] })
+  })
+  it('an execute-phase answer is done even when it lists numbered steps', () => {
+    expect(parseRun(doc('Done:\n1. made it'), 0, 'execute').state).toBe('done')
+  })
+  it('skips log noise before the document', () => {
+    expect(parseRun(`downloading duo...\n${doc('ok')}`, 0, 'plan').sessionId).toBe('2717')
+  })
+  it('numeric session ids become strings', () => {
     expect(
-      parseRun('{"status":"input_required","plan":"- one\\n* two\\n\\n3. three"}', 0).plan,
-    ).toEqual(['one', 'two', 'three'])
+      parseRun(JSON.stringify({ sessionId: 2718, status: 'success' }), 0, 'plan').sessionId,
+    ).toBe('2718')
   })
-  it('a non-zero exit is failed even with a done-looking status', () => {
-    expect(parseRun('{"status":"completed"}', 2).state).toBe('failed')
+  it('failure: non-zero process exit, empty or garbled stdout, error status or document exit code', () => {
+    expect(parseRun(doc('ok'), 1, 'plan').state).toBe('failed')
+    expect(parseRun('', 1, 'plan').state).toBe('failed')
+    expect(parseRun('{broken', 0, 'plan').state).toBe('failed')
+    expect(parseRun(doc('x', { status: 'error' }), 0, 'plan').state).toBe('failed')
+    expect(parseRun(doc('x', { exitCode: 2 }), 0, 'plan').state).toBe('failed')
   })
-  it('status error is failed', () => expect(parseRun('{"status":"error"}', 0).state).toBe('failed'))
-  it('running status', () => expect(parseRun('{"status":"running"}', 0).state).toBe('running'))
-  it('empty or garbled output gives no session id', () => {
-    expect(parseRun('', 0)).toMatchObject({ sessionId: '', plan: [] })
-    expect(parseRun('{broken', 0).sessionId).toBe('')
+  it('a failed run yields no session id and no plan', () => {
+    expect(parseRun('', 1, 'plan')).toMatchObject({ sessionId: '', plan: [], text: '' })
   })
-  it('awaiting plan needs a checkpoint status, not just a plan in a finished run', () => {
-    expect(parseRun('{"status":"completed","plan":["a"]}', 0).state).toBe('done')
+})
+
+const NOISE = '2026-11-25T08:45:45:983 [debug]: fetch: https agent with options initialized'
+const FORBIDDEN = [
+  NOISE,
+  '2026-11-25T08:45:49:892 [warning]: [Duo Workflow Runner] Failed to read server capabilities',
+  '    Error: Error querying AI flows metadata: Error: GraphQL request failed',
+  '2026-11-25T08:45:50:873 [error]: [WorkflowRailsService] Failed to create the workflow',
+  '    AgenticChatForbiddenError: GitLab Duo Agent Platform is not available for this namespace or project.',
+  '2026-11-25T08:45:51:179 [info]: [CliExitHandler] Shutdown complete, good bye :)',
+].join('\n')
+
+describe('describeDuoFailure', () => {
+  it('names the error after the last [error] entry, not the debug noise', () => {
+    expect(describeDuoFailure('', FORBIDDEN)).toBe(
+      'GitLab Duo Agent Platform is not available for this namespace or project.',
+    )
+  })
+  it('ignores earlier warning Errors', () => {
+    expect(describeDuoFailure('', FORBIDDEN)).not.toContain('AI flows metadata')
+  })
+  it('falls back to the last stderr line without an [error] entry', () => {
+    expect(describeDuoFailure('', 'a\n\nglab: duo not installed\n')).toBe('glab: duo not installed')
+  })
+  it('has a message when both streams are empty', () => {
+    expect(describeDuoFailure('', '')).toBe('duo failed')
   })
 })

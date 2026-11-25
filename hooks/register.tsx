@@ -2,8 +2,8 @@ import type { CoreEngineInterface, Register, RenderChildren } from 'claude-code'
 import { atom, read, update } from 'claude-code'
 
 import type { Chip, DuoSettings, Mr, Run, Ui } from '../types'
-import type { Decision } from './lib/duo'
-import { parseRun, resumeArgv, startArgv } from './lib/duo'
+import type { Decision, Phase } from './lib/duo'
+import { describeDuoFailure, parseRun, resumeArgv, startArgv } from './lib/duo'
 import {
   describeGlabFailure,
   firstLine,
@@ -28,7 +28,7 @@ const mrAtom = atom({ plugin: 'gitlab-mr-pane', key: 'mr' } as const, null, { sh
 const chipsAtom = atom({ plugin: 'gitlab-mr-pane', key: 'chips' } as const, [], {
   shape: 'chips-1',
 })
-const runsAtom = atom({ plugin: 'gitlab-mr-pane', key: 'runs' } as const, [], { shape: 'runs-1' })
+const runsAtom = atom({ plugin: 'gitlab-mr-pane', key: 'runs' } as const, [], { shape: 'runs-2' })
 const goalAtom = atom({ plugin: 'gitlab-mr-pane', key: 'goal' } as const, '', { shape: 'goal-1' })
 const reasonAtom = atom({ plugin: 'gitlab-mr-pane', key: 'reason' } as const, '', {
   shape: 'reason-1',
@@ -108,6 +108,7 @@ const api = async ($: Engine, path: string): Promise<Fetched> => {
 const attempt = async ($: Engine, work: () => Promise<unknown>): Promise<void> => {
   try {
     await work()
+    $.ui.invalidate('ui.render')
   } catch (err) {
     await setBusy($, false, truncate(err instanceof Error ? err.message : String(err), 160))
   }
@@ -173,13 +174,13 @@ const addChip = ($: Engine, chip: Chip) =>
 const setBusy = ($: Engine, isBusy: boolean, error = '') =>
   update($, uiAtom, (u) => ({ ...u, isBusy, error }))
 
-const record = ($: Engine, name: string, argv: readonly string[], prior?: Run) =>
+const record = ($: Engine, name: string, argv: readonly string[], phase: Phase, prior?: Run) =>
   attempt($, async () => {
     await setBusy($, true)
     const r = await run($, argv, DUO_TIMEOUT_MS)
-    const parsed = parseRun(r.stdout, r.exitCode)
+    const parsed = parseRun(r.stdout, r.exitCode, phase)
     if (parsed.state === 'failed' && prior) {
-      const why = describeGlabFailure(r.stdout, r.stderr).message
+      const why = describeDuoFailure(r.stdout, r.stderr)
       return setBusy(
         $,
         false,
@@ -192,6 +193,7 @@ const record = ($: Engine, name: string, argv: readonly string[], prior?: Run) =
       state: parsed.state,
       at: Date.now(),
       plan: parsed.plan,
+      summary: truncate(parsed.text, 400),
     }
     await update($, runsAtom, (rs) =>
       [entry, ...rs.filter((x) => x.sessionId !== entry.sessionId)].slice(0, 20),
@@ -200,16 +202,14 @@ const record = ($: Engine, name: string, argv: readonly string[], prior?: Run) =
     await setBusy(
       $,
       false,
-      parsed.state === 'failed'
-        ? truncate(describeGlabFailure(r.stdout, r.stderr).message, 160)
-        : '',
+      parsed.state === 'failed' ? truncate(describeDuoFailure(r.stdout, r.stderr), 160) : '',
     )
   })
 
 const decide = async ($: Engine, r: Run, d: Decision) => {
   const s = await read($, settingsAtom)
   await update($, uiAtom, (u) => ({ ...u, isRejecting: false }))
-  await record($, r.name, resumeArgv(r.sessionId, d, s), r)
+  await record($, r.name, resumeArgv(r.sessionId, d, s), d.approve ? 'execute' : 'plan', r)
 }
 
 const start = async ($: Engine) => {
@@ -219,7 +219,7 @@ const start = async ($: Engine) => {
     read($, settingsAtom),
   ])
   if (!goal.trim()) return setBusy($, false, 'Enter a goal first')
-  await record($, truncate(goal.trim(), 40), startArgv(goal.trim(), chips, s))
+  await record($, truncate(goal.trim(), 40), startArgv(goal.trim(), chips, s), 'plan')
 }
 
 export const register: Register = (on) => {
@@ -231,12 +231,8 @@ export const register: Register = (on) => {
       argumentHint: '<job>',
     })
     void $.ui.open({ id: PANE, title: 'Merge request' })
-    void (async () => {
-      for (;;) {
-        await attempt($, () => refresh($))
-        await $.clock.sleep(POLL_MS)
-      }
-    })()
+    void attempt($, () => refresh($))
+    $.clock.every(POLL_MS, () => void attempt($, () => refresh($)))
 
     return next(e)
   })
@@ -329,10 +325,7 @@ export const register: Register = (on) => {
           <Text color={mr ? (short ? 'warning' : 'success') : undefined} dimColor={!mr}>
             Approvals {mr ? `${mr.approvalsGiven} of ${mr.approvalsRequired}` : '—'}
           </Text>
-          <Text
-            color={mr && mr.threads.length ? 'warning' : undefined}
-            dimColor={!mr || !mr.threads.length}
-          >
+          <Text color={mr?.threads.length ? 'warning' : undefined} dimColor={!mr?.threads.length}>
             {mr ? `${mr.threads.length} open threads` : '— open threads'}
           </Text>
         </Box>
@@ -539,6 +532,7 @@ export const register: Register = (on) => {
           ) : (
             <Text dimColor>No runs yet</Text>
           )}
+          {openRuns?.state === 'done' && openRuns.summary && <Text>{openRuns.summary}</Text>}
         </Box>
       </Box>
     )

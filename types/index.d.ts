@@ -32,6 +32,7 @@ export type Run = {
   state: RunState
   at: number
   plan: string[]
+  summary: string
 }
 
 export type DuoSettings = { model: string; workflowType: string; skill: string }

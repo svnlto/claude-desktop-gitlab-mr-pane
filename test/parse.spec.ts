@@ -238,6 +238,14 @@ describe('formatting edges', () => {
     expect(tailLog('a\r\nb')).toBe('a\nb')
     expect(tailLog('x'.repeat(50), 10)).toHaveLength(10)
   })
+  it('strips what a real GitLab trace carries', () => {
+    const raw =
+      'section_start:1793791207:prepare_executor\r\u001b[0KPreparing\n\u001b[32;1mok\u001b[0;m\n\u001b[0\n2026 line\nsection_end:1793791207:prepare_executor\r\u001b[0K'
+    expect(tailLog(raw)).toBe('Preparing\nok\n\n2026 line\n')
+  })
+  it('keeps text that merely mentions sections', () => {
+    expect(tailLog('the section_start marker')).toBe('the section_start marker')
+  })
   it('truncate', () => {
     expect(truncate('abc', 3)).toBe('abc')
     expect(truncate('abcd', 3)).toBe('ab…')

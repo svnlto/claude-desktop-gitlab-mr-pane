@@ -111,9 +111,16 @@ export const formatDuration = (s: number | null): string => {
   return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`
 }
 
+// GitLab traces carry ANSI colour, truncated escapes (`ESC[0` before a newline) and
+// section markers (`section_start:<unix>:<name>`); none of it helps the model.
 export const tailLog = (log: string, maxChars = 12000): string => {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI escapes
-  const clean = log.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '')
+  const clean = log
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI escapes
+    .replace(/\u001b\[[0-9;]*[A-Za-z]?/g, '')
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips stray escapes
+    .replace(/\u001b/g, '')
+    .replace(/section_(?:start|end):\d+:[\w.-]+(?:\[[^\]]*\])?\r?/g, '')
+    .replace(/\r/g, '')
   return clean.length <= maxChars ? clean : clean.slice(-maxChars)
 }
 

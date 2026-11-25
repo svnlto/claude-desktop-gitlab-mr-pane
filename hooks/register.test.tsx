@@ -58,11 +58,25 @@ const healthy = (): Routes => ({
   [TRACE]: { stdout: '\u001b[31mlint error: a.go:4\u001b[0m\n' },
 })
 
-const PLAN = {
-  session_id: 'S',
-  status: 'INPUT_REQUIRED',
-  plan: ['Edit a.go', 'Run tests'],
-}
+// Shape of a real `duo cli run --output-format json` document (duo 10.x, schemaVersion 2.1).
+const duoDoc = (response: string, sessionId = 'S'): Reply =>
+  json({
+    schemaVersion: '2.1',
+    sessionId,
+    exitCode: 0,
+    response,
+    elements: [{ type: 'message', role: 'assistant', content: response, isComplete: true }],
+    status: 'success',
+  })
+
+const PLAN = duoDoc('Plan:\n1. Edit a.go\n2. Run tests\n\nI will wait for your approval.')
+
+const FORBIDDEN_STDERR = [
+  '2026-11-25T08:45:45:983 [debug]: fetch: https agent with options initialized',
+  '2026-11-25T08:45:50:873 [error]: [WorkflowRailsService] Failed to create the workflow',
+  '    AgenticChatForbiddenError: GitLab Duo Agent Platform is not available for this namespace or project.',
+  '2026-11-25T08:45:51:179 [info]: [CliExitHandler] Shutdown complete, good bye :)',
+].join('\n')
 
 // Stands in for the engine beneath the mod: state kept in memory, glab answered from `routes`.
 const harness = (on: On, routes: Routes) => {
@@ -291,7 +305,7 @@ test('an empty goal starts nothing', async ($, on) => {
 })
 
 test('a run passes goal, context and settings, and never --yes', async ($, on) => {
-  const h = harness(on, { ...healthy(), 'duo cli run': json(PLAN) })
+  const h = harness(on, { ...healthy(), 'duo cli run': PLAN })
   await refreshed($)
   const chips = await mount($)
   await chips.press({ key: 'add-1' })
@@ -306,22 +320,20 @@ test('a run passes goal, context and settings, and never --yes', async ($, on) =
 
   const [argv] = duoCalls(h.calls)
   expect(argv).toEqual(
-    expect.arrayContaining([
-      '--goal',
-      'fix the lint job',
-      '--model',
-      'claude_sonnet_5_5',
-      '--output-format',
-      'json',
-    ]),
+    expect.arrayContaining(['--model', 'claude_sonnet_5_5', '--output-format', 'json']),
   )
-  const items = JSON.parse(argv?.[(argv?.indexOf('--ai-context-items') ?? 0) + 1] ?? '[]')
-  expect(items[0]).toMatchObject({ id: 'job-1', metadata: { title: 'lint job log' } })
+  const goal = argv?.[(argv?.indexOf('--goal') ?? 0) + 1] ?? ''
+  expect(goal).toContain('PLAN ONLY')
+  expect(goal).toContain('Goal: fix the lint job')
+  expect(goal).toContain('<context title="lint job log">')
+  expect(goal).toContain('lint error: a.go:4')
+  expect(argv).not.toContain('--ai-context-items')
   expect(argv).not.toContain('--yes')
+  expect(argv).not.toContain('--dangerously-skip-permissions')
 })
 
 test('the plan checkpoint shows the plan, and approving resumes the session', async ($, on) => {
-  const h = harness(on, { ...healthy(), 'duo cli run': json(PLAN) })
+  const h = harness(on, { ...healthy(), 'duo cli run': PLAN })
   const first = await mount($)
   await first.input({ key: 'goal', text: 'fix it' })
   await first.press({ key: 'run' })
@@ -333,33 +345,29 @@ test('the plan checkpoint shows the plan, and approving resumes the session', as
   expect(s).toContain('2. Run tests')
   expect(s).toContain('awaiting plan')
 
-  h.routes['duo cli run'] = json({ session_id: 'S', status: 'completed', result: 'done' })
+  h.routes['duo cli run'] = duoDoc('Executed the plan.')
   const ui = await mount($)
   await ui.press({ key: 'approve' })
   await ui.unmount()
 
   const resume = duoCalls(h.calls)[1]
-  expect(resume).toEqual(
-    expect.arrayContaining(['--existing-session-id', 'S', '--approval', 'true']),
-  )
+  expect(resume).toEqual(expect.arrayContaining(['--existing-session-id', 'S']))
+  expect(resume?.at(-1)).toContain('Plan approved')
   expect(resume).not.toContain('--yes')
+  expect(resume).not.toContain('--dangerously-skip-permissions')
   const after = await screen($)
   expect(after).not.toContain('Plan needs your approval')
   expect(after).toContain('done')
 })
 
 test('rejecting asks for a reason and sends it', async ($, on) => {
-  const h = harness(on, { ...healthy(), 'duo cli run': json(PLAN) })
+  const h = harness(on, { ...healthy(), 'duo cli run': PLAN })
   const first = await mount($)
   await first.input({ key: 'goal', text: 'fix it' })
   await first.press({ key: 'run' })
   await first.unmount()
 
-  h.routes['duo cli run'] = json({
-    session_id: 'S',
-    status: 'INPUT_REQUIRED',
-    plan: ['Smaller step'],
-  })
+  h.routes['duo cli run'] = duoDoc('1. Smaller step')
   const ui = await mount($)
   await ui.press({ key: 'reject' })
   await ui.unmount()
@@ -368,16 +376,15 @@ test('rejecting asks for a reason and sends it', async ($, on) => {
   await reason.unmount()
 
   const resume = duoCalls(h.calls)[1]
-  expect(resume).toEqual(
-    expect.arrayContaining(['--approval', 'false', '--rejection-reason', 'too broad']),
-  )
+  expect(resume).toEqual(expect.arrayContaining(['--existing-session-id', 'S']))
+  expect(resume?.at(-1)).toContain('Feedback: too broad')
   expect(await screen($)).toContain('1. Smaller step')
 })
 
 test('a failed run is recorded as failed, shows the reason and is not left busy', async ($, on) => {
   harness(on, {
     ...healthy(),
-    'duo cli run': { exitCode: 1, stderr: 'duo is not available for this namespace' },
+    'duo cli run': { exitCode: 1, stderr: FORBIDDEN_STDERR },
   })
   const ui = await mount($)
   await ui.input({ key: 'goal', text: 'fix it' })
@@ -385,7 +392,7 @@ test('a failed run is recorded as failed, shows the reason and is not left busy'
   await ui.unmount()
   const s = await screen($)
   expect(s).toContain('failed')
-  expect(s).toContain('duo is not available for this namespace')
+  expect(s).toContain('GitLab Duo Agent Platform is not available for this namespace or project.')
   expect(s).not.toContain('Duo is working')
   expect(s).not.toContain('Plan needs your approval')
 })
@@ -411,20 +418,27 @@ test('a run that cannot start clears the busy state and says why', async ($, on)
 })
 
 test('a failed approval leaves the plan waiting so it can be retried', async ($, on) => {
-  const h = harness(on, { ...healthy(), 'duo cli run': json(PLAN) })
+  const h = harness(on, { ...healthy(), 'duo cli run': PLAN })
   const first = await mount($)
   await first.input({ key: 'goal', text: 'fix it' })
   await first.press({ key: 'run' })
   await first.unmount()
 
-  h.routes['duo cli run'] = { exitCode: 1, stderr: 'network unreachable' }
+  h.routes['duo cli run'] = { exitCode: 1, stderr: FORBIDDEN_STDERR }
   const ui = await mount($)
   await ui.press({ key: 'approve' })
   await ui.unmount()
 
   const s = await screen($)
   expect(s).toContain('Plan needs your approval')
-  expect(s).toContain('still awaits your decision: network unreachable')
+  const view = await mount($)
+  expect(
+    await view.find({
+      type: 'Text',
+      text: /still awaits your decision: GitLab Duo/,
+    }),
+  ).toBeTruthy()
+  await view.unmount()
 })
 
 test('the pane draws on a surface without Svg', async ($, on) => {
