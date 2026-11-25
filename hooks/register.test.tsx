@@ -91,11 +91,14 @@ const harness = (on: On, routes: Routes) => {
     return { value: { isSet: true as const, version } }
   })
   on('clock.now', () => ({ value: Date.parse('2026-01-01T00:00:30Z') }))
+  const route = (argv: readonly string[]) => {
+    const joined = argv.slice(1).join(' ')
+    const key = Object.keys(routes).find((k) => joined === k || joined.startsWith(`${k} `))
+    return key ? routes[key] : { exitCode: 1, stderr: `unrouted: ${joined}` }
+  }
   on('process.run', (_, e) => {
     calls.push([...e.argv])
-    const joined = e.argv.slice(1).join(' ')
-    const key = Object.keys(routes).find((k) => joined === k || joined.startsWith(`${k} `))
-    const reply = key ? routes[key] : { exitCode: 1, stderr: `unrouted: ${joined}` }
+    const reply = route(e.argv)
     if (reply === 'throw') throw new Error('spawn glab ENOENT')
     return {
       value: {
@@ -106,6 +109,14 @@ const harness = (on: On, routes: Routes) => {
         isStderrTruncated: false,
       },
     }
+  })
+  on('process.spawn', async function* (_: unknown, e: { argv: readonly string[] }) {
+    calls.push([...e.argv])
+    const reply = route(e.argv)
+    if (reply === 'throw') throw new Error('spawn glab ENOENT')
+    if (reply?.stdout) yield { stream: 'stdout' as const, text: reply.stdout }
+    if (reply?.stderr) yield { stream: 'stderr' as const, text: reply.stderr }
+    return { value: { code: reply?.exitCode ?? 0, signal: null } }
   })
   on('prompt.fill', (_, e) => {
     filled.push(e.text)
@@ -413,8 +424,8 @@ test('a run that cannot start clears the busy state and says why', async ($, on)
   await ui.press({ key: 'run' })
   await ui.unmount()
   const s = await screen($)
-  expect(s).toContain('process.run')
-  expect(s).not.toContain('Duo is working')
+  expect(s).toContain('spawn')
+  expect(s).not.toContain('working…')
 })
 
 test('a failed approval leaves the plan waiting so it can be retried', async ($, on) => {

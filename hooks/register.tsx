@@ -43,12 +43,13 @@ const uiAtom = atom(
   {
     error: '',
     note: '',
+    progress: '',
     isBusy: false,
     isSettingsOpen: false,
     isRejecting: false,
     selectedRun: '',
   } satisfies Ui,
-  { shape: 'ui-2' },
+  { shape: 'ui-3' },
 )
 
 const ICONS: Record<string, { d: string; color?: string }> = {
@@ -182,17 +183,41 @@ const addChip = ($: Engine, chip: Chip) =>
 const setBusy = ($: Engine, isBusy: boolean, error = '') =>
   update($, uiAtom, (u) => ({ ...u, isBusy, error }))
 
+// Streams the duo run so the pane shows live progress: a headless code review can take
+// minutes, and $.process.run would freeze the pane on "working…" until it returned.
 const record = ($: Engine, name: string, argv: readonly string[], phase: Phase, prior?: Run) =>
   attempt($, async () => {
-    await setBusy($, true)
-    const r = await run($, argv, DUO_TIMEOUT_MS)
-    const parsed = parseRun(r.stdout, r.exitCode, phase)
+    const startedAt = Date.now()
+    await update($, uiAtom, (u) => ({ ...u, isBusy: true, error: '', progress: 'working… 0s' }))
+    let out = ''
+    let errTail = ''
+    let tick = 0
+    let timedOut = false
+    const child = $.process.spawn({ argv })
+    for await (const chunk of child) {
+      if (chunk.stream === 'stdout') out += chunk.text
+      else errTail = (errTail + chunk.text).slice(-4000)
+      const elapsed = Math.round((Date.now() - startedAt) / 1000)
+      if (elapsed > tick) {
+        tick = elapsed
+        await update($, uiAtom, (u) => ({ ...u, progress: `working… ${elapsed}s` }))
+      }
+      if (Date.now() - startedAt > DUO_TIMEOUT_MS) {
+        timedOut = true
+        break
+      }
+    }
+    const code = timedOut ? 124 : ((await child.result).code ?? 1)
+    const parsed = parseRun(out, code, phase)
+    const why = () =>
+      timedOut
+        ? `no response after ${Math.round(DUO_TIMEOUT_MS / 1000)}s`
+        : describeDuoFailure(out, errTail)
     if (parsed.state === 'failed' && prior) {
-      const why = describeDuoFailure(r.stdout, r.stderr)
       return setBusy(
         $,
         false,
-        `Could not continue the run, it still awaits your decision: ${truncate(why, 120)}`,
+        `Could not continue the run, it still awaits your decision: ${truncate(why(), 120)}`,
       )
     }
     const entry: Run = {
@@ -207,11 +232,7 @@ const record = ($: Engine, name: string, argv: readonly string[], phase: Phase, 
       [entry, ...rs.filter((x) => x.sessionId !== entry.sessionId)].slice(0, 20),
     )
     await update($, uiAtom, (u) => ({ ...u, selectedRun: entry.sessionId }))
-    await setBusy(
-      $,
-      false,
-      parsed.state === 'failed' ? truncate(describeDuoFailure(r.stdout, r.stderr), 160) : '',
-    )
+    await setBusy($, false, parsed.state === 'failed' ? truncate(why(), 160) : '')
   })
 
 const decide = async ($: Engine, r: Run, d: Decision) => {
@@ -422,26 +443,31 @@ export const register: Register = (on) => {
             onInput={(v) => update($, goalAtom, () => v)}
             onSubmit={(v) => update($, goalAtom, () => v)}
           />
-          {row(
-            'duo-actions',
-            <Button
-              key="run"
-              label="Run in plan mode ↗"
-              hotkey="g"
-              variant="primary"
-              onPress={() => start($)}
-            />,
-            <Button
-              key="settings"
-              label="Settings"
-              hotkey="s"
-              variant="secondary"
-              onPress={() =>
-                update($, uiAtom, (u) => ({ ...u, isSettingsOpen: !u.isSettingsOpen }))
-              }
-            />,
-          )}
-          {ui.isBusy && <Text dimColor>Duo is working…</Text>}
+          {ui.isBusy
+            ? row(
+                'duo-busy',
+                icon('spinner'),
+                <Text dimColor>Duo is {ui.progress || 'working…'}</Text>,
+              )
+            : row(
+                'duo-actions',
+                <Button
+                  key="run"
+                  label="Run in plan mode ↗"
+                  hotkey="g"
+                  variant="primary"
+                  onPress={() => start($)}
+                />,
+                <Button
+                  key="settings"
+                  label="Settings"
+                  hotkey="s"
+                  variant="secondary"
+                  onPress={() =>
+                    update($, uiAtom, (u) => ({ ...u, isSettingsOpen: !u.isSettingsOpen }))
+                  }
+                />,
+              )}
           {ui.isSettingsOpen && (
             <Box flexDirection="column">
               <Input
@@ -481,7 +507,13 @@ export const register: Register = (on) => {
                 {i + 1}. {s}
               </Text>
             ))}
-            {ui.isRejecting ? (
+            {ui.isBusy ? (
+              row(
+                'plan-busy',
+                icon('spinner'),
+                <Text dimColor>Duo is {ui.progress || 'working…'}</Text>,
+              )
+            ) : ui.isRejecting ? (
               <Box flexDirection="column">
                 <Input
                   key="reason"

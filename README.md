@@ -46,7 +46,7 @@ In a session: `/plugin install gitlab-mr-pane --marketplace svnlto/claude-deskto
 
 ## What the mod runs
 
-Mods are not sandboxed and run with your permissions. Run `claude plugin validate .` to audit this one. Its `calls:` line lists everything it can touch: `$.process.run` (only `glab`: `mr view`, read-only `api` GET requests, and `duo cli run`), `$.state`, `$.clock`, `$.command`, `$.prompt.fill`, `$.ui`. It makes no HTTP requests of its own, reads no files and no environment variables, and holds no credentials; `glab` does the authentication.
+Mods are not sandboxed and run with your permissions. Run `claude plugin validate .` to audit this one. Its `calls:` line lists everything it can touch: `$.process.run` (only `glab`: `mr view` and read-only `api` GET requests), `$.process.spawn` (only `glab duo cli run`, streamed so the pane can show live progress), `$.state`, `$.clock`, `$.command`, `$.prompt.fill`, `$.ui`. It makes no HTTP requests of its own, reads no files and no environment variables, and holds no credentials; `glab` does the authentication.
 
 ## Development
 
