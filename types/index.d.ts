@@ -39,6 +39,7 @@ export type DuoSettings = { model: string; workflowType: string; skill: string }
 
 export type Ui = {
   error: string
+  note: string
   isBusy: boolean
   isSettingsOpen: boolean
   isRejecting: boolean

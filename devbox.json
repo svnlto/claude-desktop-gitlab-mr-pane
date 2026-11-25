@@ -11,7 +11,7 @@
   "shell": {
     "init_hook": [
       "pnpm install --frozen-lockfile --silent || pnpm install --silent",
-      "[ -d .git ] && pre-commit install >/dev/null || true"
+      "[ -d .git ] && pre-commit install -f --hook-type pre-commit >/dev/null || true"
     ]
   }
 }

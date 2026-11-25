@@ -42,12 +42,13 @@ const uiAtom = atom(
   { plugin: 'gitlab-mr-pane', key: 'ui' } as const,
   {
     error: '',
+    note: '',
     isBusy: false,
     isSettingsOpen: false,
     isRejecting: false,
     selectedRun: '',
   } satisfies Ui,
-  { shape: 'ui-1' },
+  { shape: 'ui-2' },
 )
 
 const ICONS: Record<string, { d: string; color?: string }> = {
@@ -118,9 +119,16 @@ const refresh = async ($: Engine): Promise<unknown> => {
   const view = await run($, ['glab', 'mr', 'view', '--output', 'json'])
   const failure = view.exitCode === 0 ? null : describeGlabFailure(view.stdout, view.stderr)
   const base = failure ? null : toMrBase(parseJson(view.stdout))
-  if (failure?.kind === 'no-mr' || (!failure && !base)) {
+  if (failure?.kind === 'no-mr' || failure?.kind === 'no-gitlab' || (!failure && !base)) {
     await update($, mrAtom, () => null)
-    await update($, uiAtom, (u) => ({ ...u, error: '' }))
+    await update($, uiAtom, (u) => ({
+      ...u,
+      error: '',
+      note:
+        failure?.kind === 'no-gitlab'
+          ? 'No GitLab remote for this directory, so there is no merge request to show.'
+          : 'No merge request for the current branch.',
+    }))
     return
   }
   if (!base) return stale($, failure?.message ?? 'glab failed')
@@ -147,7 +155,7 @@ const refresh = async ($: Engine): Promise<unknown> => {
   }
   const prev = await read($, mrAtom)
   await update($, mrAtom, () => next)
-  await update($, uiAtom, (u) => ({ ...u, error: '' }))
+  await update($, uiAtom, (u) => ({ ...u, error: '', note: '' }))
   for (const text of transitions(prev, next)) $.ui.toast(text)
 }
 
@@ -238,10 +246,14 @@ export const register: Register = (on) => {
   })
 
   on('command.run', { command: 'mr' }, async ($) => {
-    await $.ui.open({ id: PANE, title: 'Merge request' })
+    const opened = await $.ui.open({ id: PANE, title: 'Merge request' })
     await refresh($)
 
-    return { text: 'Merge request pane opened.' }
+    return {
+      text: opened.isPlaced
+        ? 'Merge request pane opened.'
+        : `Merge request pane is open but not shown yet (${opened.reason}). Widen the window or open it from the pane menu.`,
+    }
   })
 
   on('command.run', { command: 'mr-fix' }, async ($, e) => {
@@ -294,6 +306,11 @@ export const register: Register = (on) => {
         {kids}
       </Box>
     )
+    const badge = (color: string, text: string) => (
+      <Box borderStyle="round" borderColor={color} paddingX={1}>
+        <Text color={color}>{text}</Text>
+      </Box>
+    )
 
     return (
       <Box flexDirection="column" gap={1} padding={1}>
@@ -306,33 +323,26 @@ export const register: Register = (on) => {
         <Text dimColor>
           {mr
             ? `${mr.source} -> ${mr.target} · updated ${relativeTime(now, mr.updatedAt)}`
-            : 'No merge request for the current branch.'}
+            : ui.note || 'No merge request for the current branch.'}
         </Text>
         {ui.error && <Text color="error">{truncate(ui.error, 80)}</Text>}
-        <Box flexDirection="row" gap={2}>
-          <Text
-            color={
-              mr && pipeline === 'failed'
-                ? 'error'
-                : mr && pipeline === 'passed'
-                  ? 'success'
-                  : undefined
-            }
-            dimColor={!mr}
-          >
-            Pipeline {mr ? (pipeline === 'none' ? 'none' : pipeline) : '—'}
-          </Text>
-          <Text color={mr ? (short ? 'warning' : 'success') : undefined} dimColor={!mr}>
-            Approvals {mr ? `${mr.approvalsGiven} of ${mr.approvalsRequired}` : '—'}
-          </Text>
-          <Text color={mr?.threads.length ? 'warning' : undefined} dimColor={!mr?.threads.length}>
-            {mr ? `${mr.threads.length} open threads` : '— open threads'}
-          </Text>
-        </Box>
-        <Box flexDirection="column">
-          {row('jobs-head', icon('jobs'), <Text bold>Pipeline jobs</Text>)}
-          {mr && mr.jobs.length > 0 ? (
-            mr.jobs.map((j) =>
+        {mr && (
+          <Box flexDirection="row" gap={1}>
+            {badge(
+              pipeline === 'failed' ? 'error' : pipeline === 'passed' ? 'success' : 'subtle',
+              `pipeline ${pipeline === 'none' ? 'none' : pipeline}`,
+            )}
+            {badge(
+              short ? 'warning' : 'success',
+              `approvals ${mr.approvalsGiven} of ${mr.approvalsRequired}`,
+            )}
+            {badge(mr.threads.length ? 'warning' : 'subtle', `${mr.threads.length} open threads`)}
+          </Box>
+        )}
+        {mr && mr.jobs.length > 0 && (
+          <Box flexDirection="column">
+            {row('jobs-head', icon('jobs'), <Text bold>Pipeline jobs</Text>)}
+            {mr.jobs.map((j) =>
               row(
                 `job-${j.id}`,
                 icon(jobIcon(j.status)),
@@ -347,15 +357,13 @@ export const register: Register = (on) => {
                   />
                 ),
               ),
-            )
-          ) : (
-            <Text dimColor>{mr ? 'No jobs' : '—'}</Text>
-          )}
-        </Box>
-        <Box flexDirection="column">
-          {row('threads-head', icon('threads'), <Text bold>Open threads</Text>)}
-          {mr && mr.threads.length > 0 ? (
-            mr.threads.map((th) => {
+            )}
+          </Box>
+        )}
+        {mr && mr.threads.length > 0 && (
+          <Box flexDirection="column">
+            {row('threads-head', icon('threads'), <Text bold>Open threads</Text>)}
+            {mr.threads.map((th) => {
               const where = th.path ? `${th.path}${th.line ? `:${th.line}` : ''}` : 'general'
               return row(
                 `th-${th.id}`,
@@ -374,32 +382,41 @@ export const register: Register = (on) => {
                   }
                 />,
               )
-            })
-          ) : (
-            <Text dimColor>{mr ? 'None' : '—'}</Text>
-          )}
-        </Box>
+            })}
+          </Box>
+        )}
         <Box flexDirection="column" gap={1}>
-          {row(
-            'duo-head',
-            icon('sparkles'),
-            <Text bold>GitLab Duo</Text>,
+          <Box flexDirection="row" alignItems="center" gap={1}>
+            {icon('sparkles')}
+            <Text bold>GitLab Duo</Text>
+            <Box flexGrow={1} />
             <Text dimColor>
               {settings.model || 'default model'} · {settings.workflowType || 'default workflow'}
-            </Text>,
-          )}
-          {chips.map((c) =>
-            row(
-              `chip-${c.id}`,
-              icon('paperclip'),
-              <Text>{c.label}</Text>,
-              <Button
-                key={`rm-${c.id}`}
-                label="Remove"
-                plain
-                onPress={() => update($, chipsAtom, (cs) => cs.filter((x) => x.id !== c.id))}
-              />,
-            ),
+            </Text>
+          </Box>
+          {chips.length > 0 && (
+            <Box flexDirection="row" flexWrap="wrap" gap={1}>
+              {chips.map((c) => (
+                <Box
+                  key={`chip-${c.id}`}
+                  flexDirection="row"
+                  alignItems="center"
+                  gap={1}
+                  borderStyle="round"
+                  borderColor="subtle"
+                  paddingX={1}
+                >
+                  {icon('paperclip')}
+                  <Text>{c.label}</Text>
+                  <Button
+                    key={`rm-${c.id}`}
+                    label="×"
+                    plain
+                    onPress={() => update($, chipsAtom, (cs) => cs.filter((x) => x.id !== c.id))}
+                  />
+                </Box>
+              ))}
+            </Box>
           )}
           <Input
             key="goal"

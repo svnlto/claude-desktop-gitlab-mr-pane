@@ -150,21 +150,21 @@ test('the empty pane says there is no merge request', async ($, on) => {
   expect(await screen($)).toContain('No merge request for the current branch.')
 })
 
-test('the skeleton renders every section even with no data', async ($, on) => {
+test('with no merge request the pane shows Duo and recent runs, hiding empty sections', async ($, on) => {
   harness(on, healthy())
   const s = await screen($)
-  for (const section of ['Pipeline jobs', 'Open threads', 'GitLab Duo', 'Recent runs']) {
-    expect(s).toContain(section)
-  }
+  expect(s).toContain('GitLab Duo')
+  expect(s).toContain('Recent runs')
+  expect(s).not.toContain('Pipeline jobs')
+  expect(s).not.toContain('Open threads')
 })
 
-test('a hard glab failure still renders the skeleton, not just the error', async ($, on) => {
+test('a hard glab failure shows the error and still keeps the Duo section usable', async ($, on) => {
   harness(on, {
     [MR_VIEW]: { exitCode: 1, stdout: '{"error":{"message":"401 Unauthorized"}}', stderr: 'ERROR' },
   })
   const s = await refreshed($)
   expect(s).toContain('Could not refresh: 401 Unauthorized')
-  expect(s).toContain('Pipeline jobs')
   expect(s).toContain('GitLab Duo')
   expect(s).not.toContain('!7')
 })
@@ -174,8 +174,8 @@ test('refresh fills the header, badges, jobs and threads', async ($, on) => {
   const s = await refreshed($)
   expect(s).toContain('!7 Fix the linter')
   expect(s).toContain('fix/lint -> main · updated 30s ago')
-  expect(s).toContain('Pipeline failed')
-  expect(s).toContain('Approvals 1 of 2')
+  expect(s).toContain('pipeline failed')
+  expect(s).toContain('approvals 1 of 2')
   expect(s).toContain('1 open threads')
   expect(s).toContain('lint12s')
   expect(s).toContain('unit1m 15s')
@@ -221,7 +221,7 @@ test('a later glab failure keeps the last good data and says it is stale', async
   }
   const s = await refreshed($)
   expect(s).toContain('!7 Fix the linter')
-  expect(s).toContain('Approvals 1 of 2')
+  expect(s).toContain('approvals 1 of 2')
   expect(s).toContain('Could not refresh: Get "https://gitlab.example/api": EOF.')
   expect(h.toasts).toEqual([])
 })
@@ -231,7 +231,7 @@ test('one failing endpoint does not blank the pane or zero the badges', async ($
   await refreshed($)
   h.routes[APPROVALS] = { exitCode: 1, stderr: '  403 Forbidden' }
   const s = await refreshed($)
-  expect(s).toContain('Approvals 1 of 2')
+  expect(s).toContain('approvals 1 of 2')
   expect(s).toContain('Could not refresh: 403 Forbidden')
 })
 

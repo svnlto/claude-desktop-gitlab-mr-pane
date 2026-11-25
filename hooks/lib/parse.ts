@@ -127,7 +127,7 @@ export const tailLog = (log: string, maxChars = 12000): string => {
 export const truncate = (s: string, n: number): string =>
   s.length <= n ? s : `${s.slice(0, n - 1)}…`
 
-export type GlabFailure = { kind: 'no-mr' | 'error'; message: string }
+export type GlabFailure = { kind: 'no-mr' | 'no-gitlab' | 'error'; message: string }
 
 // glab prints errors as JSON on stdout under --output json, and as a boxed text block on stderr.
 export const describeGlabFailure = (stdout: string, stderr: string): GlabFailure => {
@@ -137,5 +137,10 @@ export const describeGlabFailure = (stdout: string, stderr: string): GlabFailure
     .map((l) => l.trim())
     .find((l) => l !== '' && l !== 'ERROR')
   const message = str(fromJson) || fromText || 'glab failed'
-  return { kind: /no open merge request/i.test(message) ? 'no-mr' : 'error', message }
+  const kind = /no open merge request/i.test(message)
+    ? 'no-mr'
+    : /none of the git remotes|not a git repository/i.test(message)
+      ? 'no-gitlab'
+      : 'error'
+  return { kind, message }
 }
