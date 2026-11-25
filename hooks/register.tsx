@@ -306,11 +306,7 @@ export const register: Register = (on) => {
         {kids}
       </Box>
     )
-    const badge = (color: string, text: string) => (
-      <Box borderStyle="round" borderColor={color} paddingX={1}>
-        <Text color={color}>{text}</Text>
-      </Box>
-    )
+    const badge = (color: string, text: string) => <Text color={color}>{text}</Text>
 
     return (
       <Box flexDirection="column" gap={1} padding={1}>
@@ -327,7 +323,7 @@ export const register: Register = (on) => {
         </Text>
         {ui.error && <Text color="error">{truncate(ui.error, 80)}</Text>}
         {mr && (
-          <Box flexDirection="row" gap={1}>
+          <Box flexDirection="row" gap={2}>
             {badge(
               pipeline === 'failed' ? 'error' : pipeline === 'passed' ? 'success' : 'subtle',
               `pipeline ${pipeline === 'none' ? 'none' : pipeline}`,
@@ -430,14 +426,14 @@ export const register: Register = (on) => {
             'duo-actions',
             <Button
               key="run"
-              label="Run in plan mode (g) ↗"
+              label="Run in plan mode ↗"
               hotkey="g"
               variant="primary"
               onPress={() => start($)}
             />,
             <Button
               key="settings"
-              label="Settings (s)"
+              label="Settings"
               hotkey="s"
               variant="secondary"
               onPress={() =>
@@ -501,14 +497,14 @@ export const register: Register = (on) => {
                 'plan-actions',
                 <Button
                   key="approve"
-                  label="Approve (a) ↗"
+                  label="Approve ↗"
                   hotkey="a"
                   variant="primary"
                   onPress={() => decide($, awaiting, { approve: true })}
                 />,
                 <Button
                   key="reject"
-                  label="Reject with reason… (x)"
+                  label="Reject with reason…"
                   hotkey="x"
                   variant="secondary"
                   onPress={() => update($, uiAtom, (u) => ({ ...u, isRejecting: true }))}
