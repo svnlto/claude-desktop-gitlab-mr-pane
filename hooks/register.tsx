@@ -318,7 +318,7 @@ export const register: Register = (on) => {
           'head',
           icon('mr'),
           <Text bold>{mr ? truncate(`!${mr.iid} ${mr.title}`, 48) : 'Merge request'}</Text>,
-          <Button key="refresh" label="Refresh" plain onPress={() => refresh($)} />,
+          <Button key="refresh" label="↻" hotkey="r" plain onPress={() => refresh($)} />,
         )}
         <Text dimColor>
           {mr
@@ -430,13 +430,15 @@ export const register: Register = (on) => {
             'duo-actions',
             <Button
               key="run"
-              label="Run in plan mode ↗"
+              label="Run in plan mode (g) ↗"
+              hotkey="g"
               variant="primary"
               onPress={() => start($)}
             />,
             <Button
               key="settings"
-              label="Settings"
+              label="Settings (s)"
+              hotkey="s"
               variant="secondary"
               onPress={() =>
                 update($, uiAtom, (u) => ({ ...u, isSettingsOpen: !u.isSettingsOpen }))
@@ -499,13 +501,15 @@ export const register: Register = (on) => {
                 'plan-actions',
                 <Button
                   key="approve"
-                  label="Approve ↗"
+                  label="Approve (a) ↗"
+                  hotkey="a"
                   variant="primary"
                   onPress={() => decide($, awaiting, { approve: true })}
                 />,
                 <Button
                   key="reject"
-                  label="Reject with reason…"
+                  label="Reject with reason… (x)"
+                  hotkey="x"
                   variant="secondary"
                   onPress={() => update($, uiAtom, (u) => ({ ...u, isRejecting: true }))}
                 />,

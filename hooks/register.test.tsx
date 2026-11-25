@@ -466,3 +466,14 @@ test('/mr-fix reports an unknown job and a missing log without filling the promp
   )
   expect(h.filled).toEqual([])
 })
+
+test('the singleton action buttons carry hotkeys', async ($, on) => {
+  harness(on, healthy())
+  await refreshed($)
+  const ui = await mount($)
+  const hotkey = async (re: RegExp) => (await ui.find({ type: 'Button', text: re }))?.props?.hotkey
+  expect(await hotkey(/↻/)).toBe('r')
+  expect(await hotkey(/Run in plan mode/)).toBe('g')
+  expect(await hotkey(/Settings/)).toBe('s')
+  await ui.unmount()
+})
